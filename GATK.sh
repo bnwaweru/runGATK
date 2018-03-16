@@ -14,9 +14,9 @@
 GATK_PATH="/data/Programs/GATK/GenomeAnalysisTK.jar"
 PICARD_PATH="/data/Programs/GATK/picard.jar"
 BWA_PATH=$(which bwa)
-BCFTOOLS_PATH=$(which bcftools)
-SAMTOOLS_PATH=$(which samtools)
-BEDTOOLS_PATH=$(which bedtools)
+BCFTOOLS_PATH=$(which bcftools || echo bcftools)
+SAMTOOLS_PATH=$(which samtools || echo samtools)
+BEDTOOLS_PATH=$(which bedtools || echo bedtools)
 SNPEFF_PATH="/data/Programs/snpEff/snpEff.jar"
 
 #################################
@@ -27,7 +27,8 @@ NT=60
 NCT=60
 # EXP="QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0 || SOR > 4.0"
 EXP="MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)"
-
+KNOWNVCF=NOVCF
+SNPEFF_Db=NODB
 
 ##############################
 ###### Default Options #######
@@ -44,11 +45,11 @@ ANNOTATE=FALSE
 
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 echo_cmd(){
 	echo -e ${YELLOW}CMD: $*${NC} 
-	echo "$*"
 	eval $*
 }
 
@@ -63,10 +64,18 @@ echo_log(){
     echo
 }
 
+echo_error(){
+	echo -e ${RED}ERROR: $*${NC} 
+}
+
+echo_warning(){
+	echo -e ${YELLOW}WARNING: $*${NC} 
+}
+
 isTool(){
 	if [ ! -f $* ];
 	then
-		echo $* does not available.
+		echo_error "$* does not available. Please intall or provide the FQPN."
 		exit
 	fi
 }
@@ -74,7 +83,7 @@ isTool(){
 isFileExit(){
 	if [ ! -f $* ];
 	then
-		echo $* does not available.
+		echo_error "$* does not available".
 		exit
 	fi
 }
@@ -82,16 +91,16 @@ isFileExit(){
 isFileWarn(){
 	if [ ! -f $* ];
 	then
-		echo $* does not available.
+		echo_warning $* does not available.
 	fi
 }
 
 getmem(){
 	if [ $CALCULATEMEM == "TRUE" ]
 		then
-		eval "cat /proc/meminfo | grep MemFree | awk '{print \$2-10000000}'"
+		eval "cat /proc/meminfo | grep MemFree | awk '{print int((\$2)/1000000)\"g\"}'"
 	else
-		MAXMEM=MAXMEM
+		echo ${MAXMEM}
 	fi
 }
 
@@ -206,12 +215,10 @@ in
 (e)
 	EXP=${OPTARG}
 	;;
-
 (h)
 	echo_usage
 	exit
 	;;
-
 (*)
 	echo_usage
 	exit
@@ -225,37 +232,49 @@ then
 	exit
 fi
 
+isTool ${GATK_PATH}
+isTool ${PICARD_PATH}
+isTool ${BCFTOOLS_PATH}
+isTool ${BEDTOOLS_PATH}
+isTool ${SAMTOOLS_PATH}	
+
 if [ ! -f ${REFERENCE%.fa}.bwt ];
 then
 	echo_log "BWA indexing"
 	echo_cmd "${BWA_PATH} index -p ${REFERENCE%.fa} ${REFERENCE}"
 fi
 
-echo_log "Performing BWA mem alignment"
-echo_cmd "${BWA_PATH} mem -t ${NT} -M -o ${SAMPLEID}.sam ${REFERENCE%.fa} ${SAMPLEID}_1.fq ${SAMPLEID}_2.fq"
-
 if [ ! -f ${REFERENCE%.fa}.dict ];
 then
 	echo_log "Creating Reference Dictionary.."
 	MAXMEM=$(getmem)
-	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${PICARD_PATH} CreateSequenceDictionary R=${REFERENCE} O=${REFERENCE%.fa}.dict"
+	echo_cmd "java -Xmx${MAXMEM} -jar ${PICARD_PATH} CreateSequenceDictionary R=${REFERENCE} O=${REFERENCE%.fa}.dict"
 fi
+
+if [ ! -f ${REFERENCE}.fai ];
+then
+	echo_log "Creating Reference fai.."
+	echo_cmd "${SAMTOOLS_PATH} faidx ${REFERENCE}"
+fi
+
+echo_log "Performing BWA mem alignment"
+echo_cmd "${BWA_PATH} mem -t ${NT} -M -o ${SAMPLEID}.sam ${REFERENCE%.fa} ${SAMPLEID}_1.${SUFFIX} ${SAMPLEID}_2.${SUFFIX}"
 
 echo_log "SAM to BAM Convertion + Sort BAM"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${PICARD_PATH} SortSam INPUT=${SAMPLEID}.sam OUTPUT=${SAMPLEID}.sort.bam SORT_ORDER=coordinate"
+echo_cmd "java -Xmx${MAXMEM} -jar ${PICARD_PATH} SortSam INPUT=${SAMPLEID}.sam OUTPUT=${SAMPLEID}.sort.bam SORT_ORDER=coordinate"
 
 echo_log "Adding ReadGroups to BAM file"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${PICARD_PATH} AddOrReplaceReadGroups I=${SAMPLEID}.sort.bam O=${SAMPLEID}.rg.sort.bam RGID=${SAMPLEID} RGLB=Pig_ddRAD RGPL=illumina RGPM=NexSeq RGPU=unit1 RGSM=${SAMPLEID}"
+echo_cmd "java -Xmx${MAXMEM} -jar ${PICARD_PATH} AddOrReplaceReadGroups I=${SAMPLEID}.sort.bam O=${SAMPLEID}.rg.sort.bam RGID=${SAMPLEID} RGLB=Pig_ddRAD RGPL=illumina RGPM=NexSeq RGPU=unit1 RGSM=${SAMPLEID}"
 
 echo_log "Collect Alignment Summary"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${PICARD_PATH} CollectAlignmentSummaryMetrics R=${REFERENCE} I=${SAMPLEID}.rg.sort.bam O=${SAMPLEID}.alignment_metrics.txt"
+echo_cmd "java -Xmx${MAXMEM} -jar ${PICARD_PATH} CollectAlignmentSummaryMetrics R=${REFERENCE} I=${SAMPLEID}.rg.sort.bam O=${SAMPLEID}.alignment_metrics.txt"
 
 echo_log "Collect Insert Size"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${PICARD_PATH} CollectInsertSizeMetrics INPUT=${SAMPLEID}.rg.sort.bam OUTPUT=${SAMPLEID}.insert_metrics.txt HISTOGRAM_FILE=${SAMPLEID}.insert_size_histogram.pdf"
+echo_cmd "java -Xmx${MAXMEM} -jar ${PICARD_PATH} CollectInsertSizeMetrics INPUT=${SAMPLEID}.rg.sort.bam OUTPUT=${SAMPLEID}.insert_metrics.txt HISTOGRAM_FILE=${SAMPLEID}.insert_size_histogram.pdf"
 
 echo_log "Samtools Depth calculation"
 echo_cmd "samtools depth -a ${SAMPLEID}.rg.sort.bam > ${SAMPLEID}.depth_out.txt"
@@ -266,40 +285,40 @@ echo_cmd "java -jar ${PICARD_PATH} MarkDuplicates INPUT=${SAMPLEID}.rg.sort.bam 
 
 echo_log "Building BAM index"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${PICARD_PATH} BuildBamIndex INPUT=${SAMPLEID}.dedup_reads.bam"
+echo_cmd "java -Xmx${MAXMEM} -jar ${PICARD_PATH} BuildBamIndex INPUT=${SAMPLEID}.dedup_reads.bam"
 
 echo_log "Realigner Target Creator"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T RealignerTargetCreator -R ${REFERENCE} -I ${SAMPLEID}.dedup_reads.bam -o ${SAMPLEID}.realignment_targets.list -nt ${NT}"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T RealignerTargetCreator -R ${REFERENCE} -I ${SAMPLEID}.dedup_reads.bam -o ${SAMPLEID}.realignment_targets.list -nt ${NT}"
 
 echo_log "Indel Realigner"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T IndelRealigner -R ${REFERENCE} -I ${SAMPLEID}.dedup_reads.bam -targetIntervals ${SAMPLEID}.realignment_targets.list -o ${SAMPLEID}.realigned_reads.bam"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T IndelRealigner -R ${REFERENCE} -I ${SAMPLEID}.dedup_reads.bam -targetIntervals ${SAMPLEID}.realignment_targets.list -o ${SAMPLEID}.realigned_reads.bam"
 
 if [[ ! -f ${KNOWNVCF} ]] || [[ ${KNOWNVCF} == "" ]];
 then
-	echo "No known variant vcf file is given. Using traditional base recaliberation method by reusing the called SNPs.."
+	echo_warning "No known variant vcf file is given. Using traditional base recaliberation method by reusing the called SNPs.."
 	echo_log "Haplotype caller for caliberation run"
 	MAXMEM=$(getmem)
-	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T HaplotypeCaller -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -o ${SAMPLEID}.raw_variants.vcf -nct ${NCT}"
+	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T HaplotypeCaller -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -o ${SAMPLEID}.raw_variants.vcf -nct ${NCT}"
 
 
 	echo_log "SNP from Raw VCF"
 	MAXMEM=$(getmem)
-	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants.vcf -selectType SNP -o ${SAMPLEID}.raw_snps.vcf"
+	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants.vcf -selectType SNP -o ${SAMPLEID}.raw_snps.vcf"
 
 	echo_log "InDels from Raw VCF"
 	MAXMEM=$(getmem)
- 	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants.vcf -selectType INDEL -o ${SAMPLEID}.raw_indels.vcf"
+ 	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants.vcf -selectType INDEL -o ${SAMPLEID}.raw_indels.vcf"
 
 	echo_log "Filtering SNP VCF 1"
 	MAXMEM=$(getmem)
-#	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_snps.vcf --filterExpression \"${EXP}\" --filterName \"basic_snp_filter\" -o ${SAMPLEID}.filtered_snps.vcf"
+#	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_snps.vcf --filterExpression \"${EXP}\" --filterName \"basic_snp_filter\" -o ${SAMPLEID}.filtered_snps.vcf"
 	echo_cmd "${BCFTOOLS_PATH} view -i 'MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)' ${SAMPLEID}.raw_snps.vcf -o ${SAMPLEID}.filtered_snps.vcf"
 
 	echo_log "Filtering InDel VCF"
 	MAXMEM=$(getmem)
-#	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_indels.vcf --filterExpression \"${EXP}\" --filterName \"basic_indel_filter\" -o ${SAMPLEID}.filtered_indels.vcf"
+#	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_indels.vcf --filterExpression \"${EXP}\" --filterName \"basic_indel_filter\" -o ${SAMPLEID}.filtered_indels.vcf"
 	echo_cmd "${BCFTOOLS_PATH} view -i 'MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)' ${SAMPLEID}.raw_indels.vcf -o ${SAMPLEID}.filtered_indels.vcf"
 
 fi
@@ -308,57 +327,60 @@ if [[ -f ${KNOWNVCF} ]] && [[ ${KNOWNVCF} != "" ]];
 then
 	echo_log "SNPs from reference VCF"
 	MAXMEM=$(getmem)
-	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${KNOWNVCF} -selectType SNP -o ${SAMPLEID}.filtered_snps.vcf"
+	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${KNOWNVCF} -selectType SNP -o ${SAMPLEID}.filtered_snps.vcf"
 
 	echo_log "InDel from reference VCF"
 	MAXMEM=$(getmem)
-	echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${KNOWNVCF} -selectType INDEL -o ${SAMPLEID}.filtered_indels.vcf"
+	echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${KNOWNVCF} -selectType INDEL -o ${SAMPLEID}.filtered_indels.vcf"
 fi
 
 echo_log "Base recaliberation 1"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T BaseRecalibrator -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -knownSites ${SAMPLEID}.filtered_snps.vcf -knownSites ${SAMPLEID}.filtered_indels.vcf -o ${SAMPLEID}.recal_data.table -nct ${NCT}"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T BaseRecalibrator -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -knownSites ${SAMPLEID}.filtered_snps.vcf -knownSites ${SAMPLEID}.filtered_indels.vcf -o ${SAMPLEID}.recal_data.table -nct ${NCT}"
 
 echo_log "Base recaliberation 2"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T BaseRecalibrator -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -knownSites ${SAMPLEID}.filtered_snps.vcf -knownSites ${SAMPLEID}.filtered_indels.vcf -BQSR ${SAMPLEID}.recal_data.table -o post_${SAMPLEID}.recal_data.table -nct ${NCT}"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T BaseRecalibrator -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -knownSites ${SAMPLEID}.filtered_snps.vcf -knownSites ${SAMPLEID}.filtered_indels.vcf -BQSR ${SAMPLEID}.recal_data.table -o post_${SAMPLEID}.recal_data.table -nct ${NCT}"
 
 echo_log "Analyze covariates"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T AnalyzeCovariates -R ${REFERENCE} -before ${SAMPLEID}.recal_data.table -after post_${SAMPLEID}.recal_data.table -plots ${SAMPLEID}.recalibration_plots.pdf"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T AnalyzeCovariates -R ${REFERENCE} -before ${SAMPLEID}.recal_data.table -after post_${SAMPLEID}.recal_data.table -plots ${SAMPLEID}.recalibration_plots.pdf"
 
 echo_log "Print reads"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T PrintReads -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -BQSR ${SAMPLEID}.recal_data.table -o ${SAMPLEID}.recal_reads.bam -nct ${NCT}"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T PrintReads -R ${REFERENCE} -I ${SAMPLEID}.realigned_reads.bam -BQSR ${SAMPLEID}.recal_data.table -o ${SAMPLEID}.recal_reads.bam -nct ${NCT}"
 
 echo_log "Variant Calling (HaplotypeCaller)"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T HaplotypeCaller -R ${REFERENCE} -I ${SAMPLEID}.recal_reads.bam -o ${SAMPLEID}.raw_variants_recal.vcf  -nct ${NCT}"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T HaplotypeCaller -R ${REFERENCE} -I ${SAMPLEID}.recal_reads.bam -o ${SAMPLEID}.raw_variants_recal.vcf  -nct ${NCT}"
 
 echo_log "SNP from Raw VCF (recalibrated)"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants_recal.vcf -selectType SNP -o ${SAMPLEID}.raw_snps_recal.vcf"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants_recal.vcf -selectType SNP -o ${SAMPLEID}.raw_snps_recal.vcf"
 
 echo_log "InDel from Raw VCF (recalibrated)"
 MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants_recal.vcf -selectType INDEL -o ${SAMPLEID}.raw_indels_recal.vcf"
+echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T SelectVariants -R ${REFERENCE} -V ${SAMPLEID}.raw_variants_recal.vcf -selectType INDEL -o ${SAMPLEID}.raw_indels_recal.vcf"
 
 echo_log "Filtering SNP VCF (recalibrated)"
 MAXMEM=$(getmem)
-# echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_snps_recal.vcf --filterExpression \"${EXP}\" --filterName \"basic_snp_filter\" -o ${SAMPLEID}.filtered_snps_final.vcf"
+# echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_snps_recal.vcf --filterExpression \"${EXP}\" --filterName \"basic_snp_filter\" -o ${SAMPLEID}.filtered_snps_final.vcf"
 echo_cmd "${BCFTOOLS_PATH} view -i 'MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)' ${SAMPLEID}.raw_snps_recal.vcf -o ${SAMPLEID}.filtered_snps_final.vcf"
 
 
 echo_log "Filtering InDel VCF (recalibrated)"
 MAXMEM=$(getmem)
-# echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_indels_recal.vcf --filterExpression \"${EXP}\" --filterName \"basic_indel_filter\" -o ${SAMPLEID}.filtered_indels_recal.vcf"
-echo_cmd "${BCFTOOLS_PATH} view -i 'MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)' ${SAMPLEID}.raw_indel_recal.vcf -o ${SAMPLEID}.filtered_indels_recal.vcf"
+# echo_cmd "java -Xmx${MAXMEM} -jar ${GATK_PATH} -T VariantFiltration -R ${REFERENCE} -V ${SAMPLEID}.raw_indels_recal.vcf --filterExpression \"${EXP}\" --filterName \"basic_indel_filter\" -o ${SAMPLEID}.filtered_indels_recal.vcf"
+echo_cmd "${BCFTOOLS_PATH} view -i 'MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)' ${SAMPLEID}.raw_indels_recal.vcf -o ${SAMPLEID}.filtered_indels_recal.vcf"
 
 
-echo_log "Functional Annotation using SnpEff"
-MAXMEM=$(getmem)
-echo_cmd "java -Xmx${MAXMEM%??????}g -jar ${SNPEFF_PATH} eff -htmlStats -csvStats ${SAMPLEID}.snpEff.stats.csv -v ${SNPEFFDB} ${SAMPLEID}.filtered_snps_final.vcf > ${SAMPLEID}.filtered_snps_final.ann.vcf"
-echo_cmd "mv snpEff_summary.html ${SAMPLEID}.snpEff.stats.html"
+if [[ ${ANNOTATE} == "TRUE" ]];
+then
+	echo_log "Functional Annotation using SnpEff"
+	MAXMEM=$(getmem)
+	echo_cmd "java -Xmx${MAXMEM} -jar ${SNPEFF_PATH} eff -htmlStats -csvStats ${SAMPLEID}.snpEff.stats.csv -v ${SNPEFFDB} ${SAMPLEID}.filtered_snps_final.vcf > ${SAMPLEID}.filtered_snps_final.ann.vcf"
+	echo_cmd "mv snpEff_summary.html ${SAMPLEID}.snpEff.stats.html"
+fi
 
 echo_log "BedGraph construction"
 echo_cmd "${BEDTOOLS_PATH} genomecov -bga -ibam ${SAMPLEID}.recal_reads.bam > ${SAMPLEID}.genomecov.bedgraph"
