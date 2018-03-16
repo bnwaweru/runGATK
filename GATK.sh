@@ -23,8 +23,8 @@ SNPEFF_PATH="/data/Programs/snpEff/snpEff.jar"
 ###### Default Parameters #######
 #################################
 
-NT=60
-NCT=60
+NT=$(nproc)
+NCT=$(nproc)
 # EXP="QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0 || SOR > 4.0"
 EXP="MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)"
 KNOWNVCF=NOVCF
@@ -122,9 +122,9 @@ echo_usage(){
 	-e Expression used to filter VCF files (bcftools). (default: \"MIN(DP>8) && MIN(MQ>40.00) && MIN(GQ>40.00)\")
 	
 	Performance:
-	-m Maximum memory for Java VM. Will be over written if -M given.
+	-m Maximum memory for Java VM. (Eg: 10g or 10G)Will be over written if -M given.
 	-M Let the tool calculate Maximum available memory for JVM (default: TRUE) Not recommended for parallel runs
-	-t Number of threads to use for bwa and GATK
+	-t Number of threads to use for bwa and GATK (default: $(nproc))
 	
 	FQPN for Tools:
 	-G Path for GATK.jar (default: ${GATK_PATH})
@@ -384,4 +384,3 @@ fi
 
 echo_log "BedGraph construction"
 echo_cmd "${BEDTOOLS_PATH} genomecov -bga -ibam ${SAMPLEID}.recal_reads.bam > ${SAMPLEID}.genomecov.bedgraph"
-
