@@ -1,6 +1,16 @@
 # runGATK
 bash wrapper for running GATK (3.8.1) pipeline
 
+Download links for the tools:
+1. GATK : https://software.broadinstitute.org/gatk/download/archive
+2. PICARD : https://broadinstitute.github.io/picard/
+3. BWA : Recommended to install through bioconda (https://sourceforge.net/projects/bio-bwa/files/)
+4. bcftools : Recommended to install through bioconda (http://www.htslib.org/download/)
+5. samtools : Recommended to install through bioconda (http://www.htslib.org/download/)
+6. bedtools : Recommended to install through bioconda (https://sourceforge.net/projects/bedtools/)
+7. snpEff : http://snpeff.sourceforge.net/download.html
+
+
 	bash GATK.sh -S Sample_Name -s fq -R Reference.fa
 	
 	Input Files:
