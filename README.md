@@ -11,6 +11,7 @@ Download links for the tools:
 7. snpEff : http://snpeff.sourceforge.net/download.html
 
 
+
 	bash GATK.sh -S Sample_Name -s fq -R Reference.fa
 	
 	Input Files:
